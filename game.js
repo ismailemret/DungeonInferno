@@ -14,8 +14,8 @@ const tileSize = 40;  // Her oda 40x40 piksel
 // Oda sayısını da alanı dolduracak şekilde artıralım
 let roomCount = 300;   // 450 toplam alanda 300 oda gezilebilir bir zindan yaratır
 
-let map = [];
-let rooms = [];
+let map = [];// Zindan verisini Zemin:1 Duvar:0 şeklinde tutar
+let rooms = [];//Zemin olan karelerin koordinat listesi
 let exitRoom = null;
 let potions = [];
 let enemies = [];
@@ -109,12 +109,16 @@ function generateMap() {
         { x: -1, y: 0 }, { x: 1, y: 0 }
     ];
 
-    // Labirent Oluşturma (Backtracking Benzeri)
+    /*Stack Mantığı ile Labirent Örme:
+	stack.length > 0 olduğu sürece algoritma zindanın derinliklerine dallanmaya devam eder.
+	Bu döngü, her adımda yeni bir hücreye gider ve "çıkmaz sokağa" girdiğinde stack'ten geri dönerek 
+	henüz keşfedilmemiş yolları arar. Bu, tüm zindanın birbirine bağlı olmasını sağlar.
+	*/
     while (stack.length > 0) {
-        // En son eklenen odayı al (Stack mantığı koridorları uzatır)
+        // En son eklenen odayı al
         let current = stack[stack.length - 1];
         
-        // Komşu odaları rastgele sırayla kontrol et
+        // Rastgeleliği arttırmak için komşu odaların sırasını her seferinde karıştırır
         let shuffledDirs = directions.sort(() => Math.random() - 0.5);
         let found = false;
 
@@ -134,8 +138,7 @@ function generateMap() {
                     }
                 }
 
-                // Sadece tek bir komşusu varsa (geldiğimiz yer) orayı oda yap
-                // Bu şart oda sayısının 120'ye ulaşmasını engelleyebilir ama labirenti labirent yapar
+                // Eğer herhangi bir odanın tek komşusu varsa yolu tekli devam ettirip labirenti ızgara olmaktan korur
                 if (neighbors <= 1 || Math.random() > 0.8) {
                     map[ny][nx] = 1;
                     rooms.push({ x: nx, y: ny });
@@ -146,12 +149,12 @@ function generateMap() {
             }
         }
 
-        // Eğer gidecek yer yoksa geri dön (backtrack)
+        // Eğer gidecek yer yoksa geri döner 
         if (!found) {
             stack.pop();
         }
         
-        // Maksimum oda sınırını yine de koruyalım
+        // Maksimum oda sınırını korur
         if (rooms.length >= 300) break;
     }
 
@@ -159,7 +162,7 @@ function generateMap() {
     placePotions();
 	placeEnemies();
 }
-
+//Bitiş noktasını oyuncudan en uzak noktaya atar
 function findFarthestRoom(sx, sy) {
     let maxDist = -1;
     rooms.forEach(room => {
@@ -173,7 +176,7 @@ function findFarthestRoom(sx, sy) {
 function placePotions() {
     potions = [];
     rooms.forEach(room => {
-        // Başlangıç ve bitiş odası hariç odalara %5 ihtimalle iksir koy
+        // Başlangıç ve bitiş odası hariç odalara %5 ihtimalle iksir koyar
         if (Math.random() > 0.95 && 
            (room.x !== player.x || room.y !== player.y) && 
            (room.x !== exitRoom.x || room.y !== exitRoom.y)) {
@@ -181,38 +184,54 @@ function placePotions() {
         }
     });
 }
+//Düşmanları rastgele yerleştirmek için
 function placeEnemies() {
+    // Düşman listesini her üretimde sıfırla
     enemies = [];
+
     rooms.forEach(room => {
+        // Kısıt: Oyuncunun başlangıç noktasında veya çıkış kapısında düşman oluşamaz
         if ((room.x === player.x && room.y === player.y) || 
             (room.x === exitRoom.x && room.y === exitRoom.y)) return;
-
+        
+        // Yatay veya dikey dar geçitleri kontrol edip gardiyanların sadece tekli koridorlara yerleştrilmesini sağlar
         let isHorizontalCorridor = (map[room.y][room.x - 1] === 0 && map[room.y][room.x + 1] === 0);
         let isVerticalCorridor = (map[room.y - 1] && map[room.y - 1][room.x] === 0 && map[room.y + 1] && map[room.y + 1][room.x] === 0);
 
-               if (isHorizontalCorridor || isVerticalCorridor) {
+        // Eğer nokta bir koridorsa, %6 ihtimalle bir gardiyan yerleştir
+        if (isHorizontalCorridor || isVerticalCorridor) {
             if (Math.random() > 0.94) {
-                // Çıkışa olan mesafeyi hesapla (Manhattan Distance)
+                
+                // Manhattan Mesafesi Hesaplama: Çıkışa ne kadar yakınız?
+                // Formül: |x1 - x2| + |y1 - y2|
                 let distToExit = Math.abs(room.x - exitRoom.x) + Math.abs(room.y - exitRoom.y);
                 
-                // Algoritma: Mesafe kısaldıkça can artar.
-                // Örn: Çıkışa çok yakınsa 3-4 can, başlangıca yakınsa 1-2 can.
+                /**
+                 * Zorluk Ölçeklendirme Algoritması:
+                 * Çıkış kapısına yaklaştıkça gardiyanların can değeri (HP) artar.
+                 * 10 birimden yakınsa: 4 HP (Güçlü)
+                 * 25 birimden yakınsa: 2 HP (Orta)
+                 * Daha uzaksa: 1 HP (Zayıf)
+                 */
                 let guardHP = distToExit < 10 ? 4 : (distToExit < 25 ? 2 : 1);
 
+                // Düşman objesini oluştur ve diziye ekle
                 enemies.push({ 
                     x: room.x, 
                     y: room.y, 
-                    type: 3, 
-                    hp: guardHP,
-                    maxHp: guardHP // UI'da göstermek için tutalım
+                    type: 3,        // Düşman tip kodu
+                    hp: guardHP,    // Mevcut can
+                    maxHp: guardHP  // UI üzerinde can barı gösterimi için referans değer
                 });
-                return;
+                return; 
             }
         }
         
+        // Eğer gardiyan yerleşmediyse tuzak ihtimalini kontrol et
         if (Math.random() > 0.94) {
             enemies.push({ 
-                x: room.x, y: room.y, 
+                x: room.x, 
+                y: room.y, 
                 type: Math.floor(Math.random() * 3),
                 hp: 1 // Tuzaklar tek vuruşluktur
             });
@@ -258,15 +277,14 @@ function draw() {
 		let dx = Math.abs(player.x - enemy.x);
 		let dy = Math.abs(player.y - enemy.y);
 
-		// Sadece oyuncunun etrafındaki 3x3 alandakileri çiz (Sis mantığı)
+		// Zorluğu dengelemek adına sadece oyuncunun etrafındaki 3x3 alandakileri çiz (Sis mantığı)
 		if (dx <= 1 && dy <= 1) {
 			const eImg = enemyImages[enemy.type];
 			
 			if (eImg && eImg.complete && eImg.naturalWidth !== 0) {
 				
-				// --- BOYUTLANDIRMA MANTIĞI ---
+				//Gardiyan tek tile içine tamamen sığdırılır
 				if (enemy.type === 3) {
-					// GARDİYAN: Kareyi tamamen doldurur (Boşluk yok)
 					ctx.drawImage(
 						eImg, 
 						enemy.x * tileSize, 
@@ -275,7 +293,7 @@ function draw() {
 						tileSize
 					);
 				} else {
-					// TUZAKLAR: Kenarlardan 5px boşluk bırakır (Eski hali)
+					//Tuzaklar için kenarlardan 5px boşluk bırakılır
 					ctx.drawImage(
 						eImg, 
 						enemy.x * tileSize + 5, 
@@ -289,7 +307,7 @@ function draw() {
 		}
 	});
 
-    // 3. Çıkış Kapısını çiz
+    // 3. Çıkış Kapısını çiz(altın kare)
     if (exitRoom) {
         ctx.fillStyle = "gold";
         ctx.fillRect(exitRoom.x * tileSize + 10, exitRoom.y * tileSize + 10, tileSize - 20, tileSize - 20);
@@ -304,42 +322,47 @@ function draw() {
     // 5. En son sisi çiz (Her şeyin üstünü örtsün diye)
     drawFog();
 }
-
+/**
+ * Oyuncunun etrafındaki aydınlık alanı hesaplar ve geri kalan her şeyi karanlıkta bırakır.
+ * "Destination-out" kompozisyon yöntemini kullanarak dinamik bir ışık halkası oluşturur.
+ */
 function drawFog() {
+	//Ana sahneyi bozmamak için geçici bir canvas oluşturur
     let tempCanvas = document.createElement('canvas');
     tempCanvas.width = canvas.width;
     tempCanvas.height = canvas.height;
     let tempCtx = tempCanvas.getContext('2d');
-
+	//Tüm ekranı siyah bir örtüyle kaplar
     tempCtx.fillStyle = "black";
     tempCtx.fillRect(0, 0, canvas.width, canvas.height);
-
+	//Siyah örtüyü oyuncunun alpha değeri olarak belirttiğimiz değişken miktarında kazır ve altındakilerin görünmesini sağlar
     tempCtx.globalCompositeOperation = "destination-out";
+	//Oyuncunun merkzinden dışarı doğru yumuşak bir ışık kaynağı oluşturur
     let gradient = tempCtx.createRadialGradient(
         player.x * tileSize + tileSize / 2,
         player.y * tileSize + tileSize / 2,
-        10,
+        10,//İç yarıçap (tam aydınlık kısım)
         player.x * tileSize + tileSize / 2,
         player.y * tileSize + tileSize / 2,
-        player.lightRadius
+        player.lightRadius//Dış yarıçap (kararmaya başlayan kısım)
     );
-    gradient.addColorStop(0, "rgba(0,0,0,1)");
-    gradient.addColorStop(1, "rgba(0,0,0,0)");
+    gradient.addColorStop(0, "rgba(0,0,0,1)");//Merkez saydam 
+    gradient.addColorStop(1, "rgba(0,0,0,0)");//Kenarlar opak
     
+	//Belirlenen değerlerle ışık dairesini çiz
     tempCtx.fillStyle = gradient;
     tempCtx.beginPath();
     tempCtx.arc(player.x * tileSize + tileSize/2, player.y * tileSize + tileSize/2, player.lightRadius, 0, Math.PI*2);
     tempCtx.fill();
-
+ 	//Sis tabakasını üst katman yap
     ctx.drawImage(tempCanvas, 0, 0);
 }
-
+//Sis çizdirmeye başladıktan sonra kaldırdık ama fikir olarak kalabilir
 /*function drawMiniMap() {
     if (!miniCtx) return;
-    let s = 10; // Harita büyüdüğü için kareleri küçülttük
+    let s = 10; // 
     miniCtx.clearRect(0, 0, miniCanvas.width, miniCanvas.height);
-    
-    // mapSize yerine mapHeight ve mapWidth kullanmalısın
+	
     for (let y = 0; y < mapHeight; y++) {
         for (let x = 0; x < mapWidth; x++) {
             if (map[y][x] === 1) {
@@ -417,7 +440,7 @@ function checkPotion() {
         console.log("İksir toplandı! Yeni HP: " + player.hp);
     }
 }
-
+//Dışardaki can değerini dinamik olarak günceller
 function updateUI() {
     const hpElement = document.getElementById("hpValue");
 
@@ -429,10 +452,10 @@ function checkEnemy() {
     let ei = enemies.findIndex(e => e.x === player.x && e.y === player.y);
     if (ei === -1) return;
 
-    // ÖNCE VERİYİ SET ET
+    //mevcut düşmanı indexe atayıp savaş modunu aktif eder ileride roll dice ekranını çağırmak için
     currentEnemy = { index: ei }; 
     inBattle = true;
-    
+    //tanımlamalar
     const enemyData = enemies[ei];
     const battleTitle = document.getElementById("battleTitle");
     const enemyLabel = document.getElementById("enemyLabel");
@@ -440,17 +463,14 @@ function checkEnemy() {
     const vsArea = document.querySelector(".vs");
     const enemyWrapper = document.getElementById("enemyDice")?.parentElement;
 
-    // UI SIFIRLAMA
+    //rollDice ekranının önceki verilerini burada sıfırlıyoruz
     document.getElementById("playerDice").innerText = "?";
     document.getElementById("enemyDice").innerText = "?";
     document.getElementById("rollBtn").disabled = false;
 if (enemyData.type === 3) {
-    // GARDİYAN MODU
-    // ID ile bulamazsa diye doğrudan h2 etiketini eziyoruz
+    //Gardiyan için ayrı tuzaklar için ayrı başlıklar gelebilmesi için direk html başlıklarına atama yaptık
     const h2Title = document.querySelector("#diceScreen h2") || document.getElementById("battleTitle");
     if (h2Title) h2Title.innerText = "⚔️ GARDİYANLA SAVAŞ!";
-
-    // Sağ taraftaki "TUZAK" yazan span'ı bul ve değiştir
     const labels = document.querySelectorAll("#diceScreen .dice-container span");
     if (labels.length > 1) labels[1].innerText = "GARDİYAN";
 
@@ -463,7 +483,7 @@ if (enemyData.type === 3) {
         statusText.style.color = "white";
     }
 } else {
-    // TUZAK MODU
+    //Aynı şekilde tuzaklar için 
     const h2Title = document.querySelector("#diceScreen h2") || document.getElementById("battleTitle");
     if (h2Title) h2Title.innerText = "⚠️ TUZAKTAN KURTUL!";
 
@@ -479,7 +499,7 @@ if (enemyData.type === 3) {
         statusText.style.color = "white";
     }
 }
-
+	//En son zar ekranını çağırır
     document.getElementById("diceScreen").classList.remove("hidden");
 }
 function rollDice() {
@@ -493,34 +513,34 @@ function rollDice() {
     if (!currentEnemy || inBattle === false) return;
     rollBtn.disabled = true;
 
-    // --- 1. SESİ BAŞLAT ---
+    //Sesi başlatır
     if (shakingSound) {
-        shakingSound.currentTime = 0; // Her atışta baştan başlasın
+        shakingSound.currentTime = 0; // Her atışta baştan başlar
         shakingSound.play();
     }
     const enemyData = enemies[currentEnemy.index];
     
     pDice.classList.add("shaking");
-    eDice.classList.add("shaking"); // Gardiyan gelirse her iki zar da sallansın
+    eDice.classList.add("shaking"); // Gardiyan gelirse her iki zar da sallanır
 
     setTimeout(() => {
-        // --- 2. SESİ DURDUR ---
+        //Sesi Durdurur
         if (shakingSound) {
-            shakingSound.pause(); // Sallanma bitince sesi kes
+            shakingSound.pause(); // Sallanma bitince sesi keser
         }
 
         pDice.classList.remove("shaking");
         eDice.classList.remove("shaking");
         
-        // 1. Zarları At
+        // Zarları belirler
         const p = Math.ceil(Math.random() * 6);
         let e; // Düşman zar değeri
 
         if (enemyData.type === 3) {
-            // GARDİYAN: Karşılıklı zar atılır
+            // Gardiyanla karşılıklı zar atılır
             e = Math.ceil(Math.random() * 6);
         } else {
-            // TUZAKLAR: Sabit 3 hedefi
+            //Tuzaklar için sabit 3 hedefi
             e = 3; 
         }
         
@@ -529,40 +549,42 @@ function rollDice() {
         eDice.innerText = e;
 
         setTimeout(() => {
-            // 3. Karşılaştır (Hata buradaydı, targetValue zaten e'ye eşit)
+            // Karşılaştır 
             let targetValue = e; 
 
-            // EŞİTLİK
+            //Eşitlik durumunda  hiçbişey yapmamasını sağlar
             if (p === targetValue) {
                 statusText.innerText = "EŞİTLİK! Tekrar at.";
                 statusText.style.color = "white";
                 rollBtn.disabled = false;
                 return;
             }
-
+			//Eğer oyuncu daha yüksek atarsa kazanır
             let win = p > targetValue;
+			//Kaybetme durumunda gardiyandan 3 tuzaktan 1 hasar alınır 
             let dmg = (enemyData.type === 3) ? 3 : 1;
-
+			//Büyük zar gelme durumları
             if (win) {
-                // BAŞARI DURUMU
-                const successSound = document.getElementById("soundSuccess");
+                //başarılı vuruş sesi
+				const successSound = document.getElementById("soundSuccess");
                 if (successSound) {
                     
                     successSound.currentTime = 0;
                     successSound.play();
                 }
-
+				//Eğer rakip gardiyansa 1 hasar vurup kalan canını gösterir
                 if (enemyData.type === 3) {
                     enemyData.hp--; 
                     if (enemyData.hp > 0) {
                         statusText.innerText = `DARBE! Kalan Can: ${enemyData.hp}`;
                         statusText.style.color = "#00ffff";
-                        rollBtn.disabled = false; // Tekrar atmasına izin ver
+                        rollBtn.disabled = false; //bitmediyse tekrar zar attırır
                     } else {
                         statusText.innerText = "GARDİYAN DÜŞTÜ!";
                         statusText.style.color = "#00ff00";
                         setTimeout(closeBattle, 1000);
                     }
+					//Tuzaklar için sadece kurtulma durumu
                 } else {
                     statusText.innerText = "BAŞARILI!";
                     statusText.style.color = "#00ff00";
@@ -572,9 +594,9 @@ function rollDice() {
                 document.getElementById("soundWin")?.play();
 
             } else {
-                // HASAR ALMA DURUMU
+                //Hasar alma durumu
                 player.hp -= dmg;
-                updateUI(); // Arayüzü güncelle
+                updateUI(); // Arayüzü günceller
                 
                 if (hpValue) hpValue.innerText = player.hp;
                 statusText.innerText = `BAŞARISIZ! -${dmg} CAN`;
@@ -595,7 +617,7 @@ function rollDice() {
                         document.getElementById("diceScreen").classList.add("hidden");
                         document.getElementById("loseScreen").classList.remove("hidden");
     
-                        //yenilgi sesini çal
+                        //Yenilgi sesini çal
                         document.getElementById("soundVictoryLoop")?.play();
 
                         if (defeatMusic) {
@@ -611,6 +633,7 @@ function rollDice() {
         }, 500);
     }, 800);
 }
+//rollDice ekranını kapatıp müziği tekrar başlatır arayüzü sıfırlar ve değişkenleri varsayılana döndürür
 function closeBattle() {
     toggleMusic(true);
 
